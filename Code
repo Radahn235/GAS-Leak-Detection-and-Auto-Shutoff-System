@@ -1,0 +1,54 @@
+#include <WiFi.h>
+#include <HTTPClient.h>
+
+#define BUZZER_PIN 25  // Using GPIO25 for the buzzer
+
+const char* ssid = // "Replace with your WiFi SSID"
+const char* password =// "Replace with your WiFi password"
+const char* botToken = // Replace with your Telegram Bot Token
+const char* chatID = // Replace with your Telegram Chat ID
+
+void sendTelegramMessage() {
+  String message = "⚠️ GAS LEAK DETECTED! Take immediate action.";
+  String url = "https://api.telegram.org/bot" + String(botToken) + "/sendMessage?chat_id=" + String(chatID) + "&text=" + message;
+
+  HTTPClient http;
+  http.begin(url);
+  int httpResponseCode = http.GET();
+
+  if (httpResponseCode > 0) {
+    Serial.println("Message Sent Successfully!");
+  } else {
+    Serial.print("Error in sending message: ");
+    Serial.println(httpResponseCode);
+  }
+
+  http.end();
+}
+
+void setup() {
+  Serial.begin(115200);
+  pinMode(BUZZER_PIN, OUTPUT);
+  digitalWrite(BUZZER_PIN, LOW);  // Ensure buzzer is OFF at start
+
+  // Connect to WiFi
+  Serial.print("Connecting to WiFi...");
+  WiFi.begin(ssid, password);
+  while (WiFi.status() != WL_CONNECTED) {
+    delay(500);
+    Serial.print(".");
+  }
+  Serial.println("\nConnected to WiFi!");
+
+  delay(10000);  // Wait for 10 seconds before activating the buzzer and sending a message
+
+  sendTelegramMessage();  // Send the alert message
+
+  digitalWrite(BUZZER_PIN, HIGH); // Turn buzzer ON
+  delay(5000);  // Keep it ON for 5 seconds
+  digitalWrite(BUZZER_PIN, LOW);  // Turn it OFF
+}
+
+void loop() {
+  // Nothing in loop since everything runs once in setup()
+}
