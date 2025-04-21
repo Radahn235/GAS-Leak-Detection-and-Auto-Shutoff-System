@@ -1,54 +1,139 @@
-#include <WiFi.h>
-#include <HTTPClient.h>
+#include <WiFi.h> 
+#include <HTTPClient.h> 
 
-#define BUZZER_PIN 25  // Using GPIO25 for the buzzer
+// Pin definitions 
+#define BUZZER_PIN 25   // Buzzer alert         
+#define MQ6_A0_PIN   34   // MQ‑6 analog output       
+#define ENA   13   // L298N ENA (PWM)              
+#define IN1    14   // L298N IN1             
+#define IN2   27   // L298N IN2              
+#define LIMIT_SWITCH_OFF    4   // Lower switch (OFF position) 
+#define LIMIT_SWITCH_ON     5   // Upper switch (ON position) 
+#define PUSH_BUTTON   23   // Manual toggle button         
 
-const char* ssid = // "Replace with your WiFi SSID"
-const char* password =// "Replace with your WiFi password"
-const char* botToken = // Replace with your Telegram Bot Token
-const char* chatID = // Replace with your Telegram Chat ID
+// PWM configuration 
+#define PWM_CHANNEL   0   
+#define PWM_FREQ   5000      
+#define PWM_RES  8   // 0–255          
 
-void sendTelegramMessage() {
-  String message = "⚠️ GAS LEAK DETECTED! Take immediate action.";
-  String url = "https://api.telegram.org/bot" + String(botToken) + "/sendMessage?chat_id=" + String(chatID) + "&text=" + message;
 
-  HTTPClient http;
-  http.begin(url);
-  int httpResponseCode = http.GET();
+// WiFi & Telegram credentials 
+const char* ssid   = //"Replace with your WiFi SSID";
+const char* password = //"Replace with your WiFi password"; 
+const char* botToken = //"Replace with your Telegram Bot Token" ; 
+const char* chatID   = "Replace with your Telegram Chat ID";
 
-  if (httpResponseCode > 0) {
-    Serial.println("Message Sent Successfully!");
-  } else {
-    Serial.print("Error in sending message: ");
-    Serial.println(httpResponseCode);
-  }
-
-  http.end();
+// State flags 
+bool alertSent = false; 
+bool knobIsOn  = true;    // true = valve open, false = valve 
+closed 
+ 
+void sendTelegramMessage() { 
+  if (!alertSent) { 
+    String msg = "⚠ GAS LEAK DETECTED! Buzzer Activated & Gas Valve Closing!"; 
+    String url = String("https://api.telegram.org/bot") + botToken + "/sendMessage?chat_id=" + chatID + "&text=" + msg; 
+    HTTPClient http; 
+    http.begin(url); 
+    int code = http.GET(); 
+    http.end(); 
+    Serial.print("Telegram: "); Serial.println(code>0 ? "OK" : "ERR"); 
+    alertSent = true; 
+  } 
+} 
+ 
+void stopMotor() { 
+  digitalWrite(IN1, LOW); 
+  digitalWrite(IN2, LOW); 
+  ledcWrite(PWM_CHANNEL, 0); 
 }
 
-void setup() {
-  Serial.begin(115200);
-  pinMode(BUZZER_PIN, OUTPUT);
-  digitalWrite(BUZZER_PIN, LOW);  // Ensure buzzer is OFF at start
+void rotateToOff() { 
+Serial.println("Rotating anticlockwise → OFF"); 
+digitalWrite(IN1, LOW); 
+digitalWrite(IN2, HIGH); 
+ledcWrite(PWM_CHANNEL, 200); 
+while (digitalRead(LIMIT_SWITCH_OFF) == HIGH) 
+{ 
+delay(1); 
+} 
+stopMotor(); 
+knobIsOn = false; 
+Serial.println("Reached OFF"); 
+} 
 
-  // Connect to WiFi
-  Serial.print("Connecting to WiFi...");
-  WiFi.begin(ssid, password);
-  while (WiFi.status() != WL_CONNECTED) {
-    delay(500);
-    Serial.print(".");
-  }
-  Serial.println("\nConnected to WiFi!");
+void rotateToOn() { 
+Serial.println("Rotating clockwise → ON"); 
+digitalWrite(IN1, HIGH); 
+digitalWrite(IN2, LOW); 
+ledcWrite(PWM_CHANNEL, 200); 
+while (digitalRead(LIMIT_SWITCH_ON) == HIGH) { 
+delay(1); 
+} 
+stopMotor(); 
+knobIsOn = true; 
+Serial.println("Reached ON"); 
+} 
+void setup() { 
+Serial.begin(115200); 
 
-  delay(10000);  // Wait for 10 seconds before activating the buzzer and sending a message
+// Motor driver pins 6 
+pinMode(IN1, OUTPUT); 
+pinMode(IN2, OUTPUT); 
+pinMode(ENA, OUTPUT); 
+stopMotor(); 
 
-  sendTelegramMessage();  // Send the alert message
+// Inputs 
+pinMode(LIMIT_SWITCH_OFF, INPUT_PULLUP); 
+pinMode(LIMIT_SWITCH_ON,  INPUT_PULLUP); 
+pinMode(PUSH_BUTTON,      INPUT_PULLUP); 
 
-  digitalWrite(BUZZER_PIN, HIGH); // Turn buzzer ON
-  delay(5000);  // Keep it ON for 5 seconds
-  digitalWrite(BUZZER_PIN, LOW);  // Turn it OFF
+// Buzzer 
+pinMode(BUZZER_PIN, OUTPUT); 
+digitalWrite(BUZZER_PIN, LOW); 
+
+// PWM setup 
+ledcSetup(PWM_CHANNEL, PWM_FREQ, PWM_RES); 
+ledcAttachPin(ENA, PWM_CHANNEL); 
+
+// Connect WiFi 
+WiFi.begin(ssid, password); 
+Serial.print("WiFi..."); 
+int t=0; 
+while (WiFi.status() != WL_CONNECTED && t++ < 20) { 
+delay(500); 
+Serial.print("."); 
+} 
+Serial.println(WiFi.status()==WL_CONNECTED ? " 
+connected" : " failed"); 
+if (WiFi.status() != WL_CONNECTED) ESP.restart(); 
 }
 
-void loop() {
-  // Nothing in loop since everything runs once in setup()
+void loop() { 
+  static bool lastBtn = HIGH; 
+  static unsigned long lastDebounce = 0; 
+  const unsigned long debounceDelay = 50; 
+ 
+  // Read gas sensor 
+  int gasLevel = analogRead(MQ6_A0_PIN); 
+  Serial.print("Gas Level: "); Serial.println(gasLevel); 
+ 
+  // Manual toggle button 
+  bool btn = digitalRead(PUSH_BUTTON); 
+  if (btn != lastBtn) lastDebounce = millis(); 
+  if ((millis() - lastDebounce) > debounceDelay && lastBtn == HIGH && btn == LOW) { 
+    Serial.println("Button Pressed"); 
+    if (knobIsOn) rotateToOff(); 
+    else          rotateToOn(); 
+  } 
+  lastBtn = btn; 
+ 
+  // Gas leak detection 
+  if (gasLevel > 1200 && !alertSent) { sendTelegramMessage(); 
+    digitalWrite(BUZZER_PIN, HIGH); 
+    delay(10000);                  // Buzzer on for 10 s 
+    digitalWrite(BUZZER_PIN, LOW); 
+    rotateToOff(); 
+  } 
+ 
+delay(200); 
 }
