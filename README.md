@@ -5,7 +5,7 @@
 🔊 Buzzer alarm on gas detection
 🔄 DC motor shuts off gas using limit switch positioning
 📲 Sends Telegram alert during leakage
-🔘 Manual button to toggle gas ON/OFF\n
+🔘 Manual button to toggle gas ON/OFF
 🛠️ Uses a custom bracket (not 3D printed) for motor and switches
 
 **🔌 Pin Configuration (ESP32)**:
